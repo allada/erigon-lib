@@ -65,7 +65,7 @@ func (f *Send) notifyTests() {
 	}
 }
 
-func (f *Send) BroadcastPooledTxs(rlps [][]byte) (txSentTo []int) {
+func (f *Send) BroadcastPooledTxs(rlps [][]byte, sendToAllPeers bool) (txSentTo []int) {
 	defer f.notifyTests()
 	if len(rlps) == 0 {
 		return
@@ -76,23 +76,26 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte) (txSentTo []int) {
 		size += len(rlps[i])
 		if i == l-1 || size >= p2pTxPacketLimit {
 			txsData := types2.EncodeTransactions(rlps[prev:i+1], nil)
-			var txs66 *sentry.SendMessageToRandomPeersRequest
+			txs66 := &sentry.SendMessageToRandomPeersRequest{
+				Data: &sentry.OutboundMessageData{
+					Id:   sentry.MessageId_TRANSACTIONS_66,
+					Data: txsData,
+				},
+				MaxPeers: 100,
+			}
 			for _, sentryClient := range f.sentryClients {
 				if !sentryClient.Ready() {
 					continue
 				}
 				switch sentryClient.Protocol() {
 				case direct.ETH66, direct.ETH67:
-					if txs66 == nil {
-						txs66 = &sentry.SendMessageToRandomPeersRequest{
-							Data: &sentry.OutboundMessageData{
-								Id:   sentry.MessageId_TRANSACTIONS_66,
-								Data: txsData,
-							},
-							MaxPeers: 100,
-						}
+					var peers *sentry.SentPeers
+					var err error
+					if sendToAllPeers {
+						peers, err = sentryClient.SendMessageToAll(f.ctx, txs66.Data)
+					} else {
+						peers, err = sentryClient.SendMessageToRandomPeers(f.ctx, txs66)
 					}
-					peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, txs66)
 					if err != nil {
 						log.Debug("[txpool.send] BroadcastPooledTxs", "err", err)
 					}
